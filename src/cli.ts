@@ -586,6 +586,9 @@ function loadRecipeInput(file: string, index?: number): RecipeInput {
   if (value.categories !== undefined && (!Array.isArray(value.categories) || value.categories.some((item) => typeof item !== "string"))) {
     throw new Error("categories must be an array of Paprika category names or UIDs.");
   }
+  if (value.photo_data !== undefined && (typeof value.photo_data !== "string" || value.photo_data.length === 0)) {
+    throw new Error("photo_data must be a non-empty base64 string.");
+  }
   if (value.rating !== undefined) {
     const rating = value.rating;
     if (typeof rating !== "number" || !Number.isInteger(rating) || rating < 0 || rating > 5) {
@@ -631,7 +634,7 @@ function printWritePreview(action: string, recipe: Recipe, json?: boolean): void
   console.log(`\n${action}: ${style.bold(recipe.name)}`);
   console.log(style.dim(`UID: ${recipe.uid}`));
   console.log(style.dim(`Categories: ${recipe.categories.length || "none"}`));
-  console.log(style.dim(`Ingredients: ${recipe.ingredients.split("\n").filter(Boolean).length} lines; directions: ${recipe.directions.split("\n").filter(Boolean).length} lines\n`));
+  console.log(style.dim(`Ingredients: ${recipe.ingredients.split("\n").filter(Boolean).length} lines; directions: ${recipe.directions.split("\n").filter(Boolean).length} lines${recipe.photo ? "; photo attached" : ""}\n`));
 }
 
 function printWriteSuccess(action: string, recipe: Recipe, json?: boolean): void {

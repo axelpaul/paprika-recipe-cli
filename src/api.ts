@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import { PaprikaClient as PaprikaWriteClient } from "@bojanrajkovic/mcp-paprika/dist/paprika/client.js";
 import type { Recipe as PaprikaSyncRecipe } from "@bojanrajkovic/mcp-paprika/dist/paprika/types.js";
+import { normalizePhoto, sha256Hex } from "@bojanrajkovic/mcp-paprika/dist/tools/photo-helpers.js";
 import type {
   PaprikaConfig,
   Recipe,
@@ -168,7 +169,8 @@ export class PaprikaClient {
   /** Create a new recipe and notify Paprika clients to refresh. */
   async createRecipe(input: RecipeInput, categories: string[]): Promise<Recipe> {
     const recipe = this.recipeFromInput(input, categories);
-    return this.saveRecipe(recipe);
+    const saved = await this.saveRecipe(recipe);
+    return this.attachImportedPhoto(saved, input.photo_data);
   }
 
   /** Build a write-ready recipe without changing the cloud. */
@@ -179,7 +181,8 @@ export class PaprikaClient {
   /** Update an existing recipe, preserving its fields unless input overrides them. */
   async updateRecipe(existing: Recipe, input: RecipeInput, categories: string[]): Promise<Recipe> {
     const recipe = this.recipeFromInput(input, categories, existing);
-    return this.saveRecipe(recipe);
+    const saved = await this.saveRecipe(recipe);
+    return this.attachImportedPhoto(saved, input.photo_data);
   }
 
   /** Builds a write-ready recipe without changing the cloud. */
@@ -223,6 +226,80 @@ export class PaprikaClient {
     // one here.
     recipe.hash = existing?.hash ?? "";
     return recipe;
+  }
+
+  /**
+   * Attach an image embedded in a `.paprikarecipes`-style import record.
+   * Paprika stores a thumbnail and full JPEG separately, so this intentionally
+   * uses the verified three-request uploader from mcp-paprika.
+   */
+  private async attachImportedPhoto(recipe: Recipe, photoData?: string): Promise<Recipe> {
+    if (!photoData || recipe.photo) return recipe;
+    const encoded = photoData.replace(/^data:[^;]+;base64,/i, "");
+    const bytes = Buffer.from(encoded, "base64");
+    if (bytes.length === 0) throw new Error("photo_data is empty or invalid base64.");
+
+    const { thumbnail, full } = await normalizePhoto(bytes);
+    const photoUid = randomUUID().toUpperCase();
+    const thumbnailUid = randomUUID().toUpperCase();
+    const recipeWithPhoto: Recipe = {
+      ...recipe,
+      photo: `${thumbnailUid}.jpg`,
+      photo_large: `${photoUid}.jpg`,
+      photo_hash: sha256Hex(thumbnail),
+    };
+    const client = new PaprikaWriteClient(this.email, this.password);
+    await client.authenticate();
+    await client.uploadPhoto(
+      this.toSyncRecipe(recipeWithPhoto),
+      {
+        uid: photoUid as never,
+        recipeUid: recipe.uid as never,
+        filename: `${photoUid}.jpg`,
+        name: "1",
+        orderFlag: 0,
+        hash: sha256Hex(full),
+        deleted: false,
+      },
+      thumbnail,
+      full,
+    );
+    await client.notifySync();
+    return recipeWithPhoto;
+  }
+
+  private toSyncRecipe(recipe: Recipe): PaprikaSyncRecipe {
+    return {
+      uid: recipe.uid,
+      hash: recipe.hash,
+      name: recipe.name,
+      categories: recipe.categories,
+      ingredients: recipe.ingredients,
+      directions: recipe.directions,
+      description: recipe.description,
+      notes: recipe.notes,
+      prepTime: recipe.prep_time,
+      cookTime: recipe.cook_time,
+      totalTime: recipe.total_time,
+      servings: recipe.servings,
+      difficulty: recipe.difficulty,
+      rating: recipe.rating,
+      created: recipe.created,
+      imageUrl: recipe.image_url,
+      photo: recipe.photo,
+      photoHash: recipe.photo_hash,
+      photoLarge: recipe.photo_large,
+      photoUrl: recipe.photo_url,
+      source: recipe.source,
+      sourceUrl: recipe.source_url,
+      onFavorites: recipe.on_favorites,
+      inTrash: recipe.in_trash,
+      isPinned: recipe.is_pinned,
+      onGroceryList: recipe.on_grocery_list,
+      scale: recipe.scale,
+      nutritionalInfo: recipe.nutritional_info,
+      deleted: false,
+    } as unknown as PaprikaSyncRecipe;
   }
 
   /**

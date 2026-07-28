@@ -68,6 +68,8 @@ export interface RecipeInput {
   rating?: number;
   is_pinned?: boolean;
   on_favorites?: boolean;
+  /** Base64 image bytes from a Paprika import JSON; uploaded after the recipe. */
+  photo_data?: string;
 }
 
 export interface Meal {

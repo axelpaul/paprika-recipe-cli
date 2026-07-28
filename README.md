@@ -87,12 +87,12 @@ The input must contain `name`, `ingredients`, and `directions`. Optional fields
 include `description`, `notes`, `servings`, `prep_time`, `cook_time`,
 `total_time`, `source`, `source_url`, `image_url`, `rating`, `is_pinned`,
 `on_favorites`, and `categories`. Categories may be category names or UIDs and
-are resolved before saving. See [`examples/recipe.json`](examples/recipe.json).
+are resolved before saving. `photo_data`, when present, is decoded from base64,
+normalised to Paprika's full-size JPEG plus thumbnail, and attached after the
+recipe is saved. See [`examples/recipe.json`](examples/recipe.json).
 
-Recipe photos are intentionally not included in this first write command: the
-sync API uses a separate multipart upload sequence for them. A source URL or
-`image_url` is preserved now; binary photo upload will be added as its own
-verified command rather than quietly getting it wrong.
+Existing recipes with a photo are left alone: the command will not silently add
+a second one. Replacing an existing photo will be an explicit follow-up command.
 
 ### Meal Planning
 

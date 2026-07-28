@@ -1,0 +1,10 @@
+{
+  "name": "Example Tomato Pasta",
+  "description": "A small example for the write-preview workflow.",
+  "ingredients": "200 g pasta\n400 g canned tomatoes\n1 garlic clove\n20 g parmesan",
+  "directions": "Cook the pasta.\nSimmer the tomatoes with garlic.\nCombine and finish with parmesan.",
+  "servings": "2",
+  "total_time": "25 min",
+  "categories": ["Pasta"],
+  "source": "Paprika CLI example"
+}

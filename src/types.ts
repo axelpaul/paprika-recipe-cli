@@ -44,6 +44,32 @@ export interface Recipe {
   photo_url: string | null;
 }
 
+/**
+ * Portable input format used by `recipe-create` and `recipe-update`.
+ * Categories may be Paprika category names or UIDs; names are resolved before
+ * a recipe is saved.
+ */
+export interface RecipeInput {
+  name: string;
+  ingredients: string;
+  directions: string;
+  description?: string;
+  notes?: string;
+  nutritional_info?: string;
+  servings?: string;
+  difficulty?: string;
+  prep_time?: string;
+  cook_time?: string;
+  total_time?: string;
+  source?: string;
+  source_url?: string;
+  image_url?: string;
+  categories?: string[];
+  rating?: number;
+  is_pinned?: boolean;
+  on_favorites?: boolean;
+}
+
 export interface Meal {
   uid: string;
   recipe_uid: string | null;

@@ -5,6 +5,7 @@
  */
 
 import { Command } from "commander";
+import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { PaprikaClient } from "./api.js";
 import {
@@ -14,7 +15,7 @@ import {
   getConfigPath,
   clearConfig,
 } from "./config.js";
-import type { Recipe, Meal } from "./types.js";
+import type { Recipe, Meal, RecipeInput, Category } from "./types.js";
 import { ExitCode } from "./types.js";
 import { setNoColor, printError, printSuccess, style } from "./output.js";
 
@@ -316,6 +317,65 @@ program
   });
 
 // ============================================
+// Recipe Write Commands
+// ============================================
+
+program
+  .command("recipe-create")
+  .description("Create a recipe from a JSON file (preview by default; use --yes to upload)")
+  .argument("<file>", "Recipe JSON file")
+  .option("--yes", "Upload the recipe to Paprika cloud sync")
+  .option("--json", "Output the resolved recipe as JSON")
+  .action(async (file: string, options: { yes?: boolean; json?: boolean }) => {
+    const config = requireConfig();
+    const client = new PaprikaClient(config);
+    try {
+      const input = loadRecipeInput(file);
+      const categoryUids = await resolveCategories(client, input.categories ?? []);
+      const preview = await client.previewRecipe(input, categoryUids);
+      if (!options.yes) {
+        printWritePreview("Would create", preview, options.json);
+        if (!options.json) console.log(style.dim("No cloud changes made. Re-run with --yes after reviewing the recipe."));
+        return;
+      }
+      const saved = await client.createRecipe(input, categoryUids);
+      printWriteSuccess("Created", saved, options.json);
+    } catch (error) {
+      printError(error instanceof Error ? error.message : String(error));
+      process.exit(ExitCode.Failure);
+    }
+  });
+
+program
+  .command("recipe-update")
+  .description("Replace recipe fields from a JSON file (preview by default; use --yes to upload)")
+  .argument("<identifier>", "Recipe UID or exact recipe name")
+  .argument("<file>", "Complete replacement recipe JSON file")
+  .option("--yes", "Upload the replacement to Paprika cloud sync")
+  .option("--json", "Output the resolved recipe as JSON")
+  .action(async (identifier: string, file: string, options: { yes?: boolean; json?: boolean }) => {
+    const config = requireConfig();
+    const client = new PaprikaClient(config);
+    try {
+      const input = loadRecipeInput(file);
+      const existing = isUuid(identifier) ? await client.getRecipe(identifier) : await client.findRecipeByName(identifier);
+      if (!existing) throw new Error(`Recipe not found: ${identifier}`);
+      const categoryUids = await resolveCategories(client, input.categories ?? existing.categories);
+      const preview = await client.previewRecipe(input, categoryUids, existing);
+      if (!options.yes) {
+        printWritePreview("Would update", preview, options.json);
+        if (!options.json) console.log(style.dim("No cloud changes made. Re-run with --yes after reviewing the recipe."));
+        return;
+      }
+      const saved = await client.updateRecipe(existing, input, categoryUids);
+      printWriteSuccess("Updated", saved, options.json);
+    } catch (error) {
+      printError(error instanceof Error ? error.message : String(error));
+      process.exit(ExitCode.Failure);
+    }
+  });
+
+// ============================================
 // Meal Plan Commands
 // ============================================
 
@@ -495,6 +555,71 @@ function printRecipe(recipe: Recipe): void {
   }
 
   console.log("");
+}
+
+function loadRecipeInput(file: string): RecipeInput {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    throw new Error(`Could not read recipe JSON from ${file}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Recipe input must be a JSON object.");
+  }
+  const value = parsed as Record<string, unknown>;
+  for (const field of ["name", "ingredients", "directions"] as const) {
+    if (typeof value[field] !== "string" || !value[field].trim()) {
+      throw new Error(`Recipe input requires a non-empty string: ${field}`);
+    }
+  }
+  if (value.categories !== undefined && (!Array.isArray(value.categories) || value.categories.some((item) => typeof item !== "string"))) {
+    throw new Error("categories must be an array of Paprika category names or UIDs.");
+  }
+  if (value.rating !== undefined) {
+    const rating = value.rating;
+    if (typeof rating !== "number" || !Number.isInteger(rating) || rating < 0 || rating > 5) {
+      throw new Error("rating must be an integer from 0 to 5.");
+    }
+  }
+  return value as unknown as RecipeInput;
+}
+
+async function resolveCategories(client: PaprikaClient, values: string[]): Promise<string[]> {
+  if (values.length === 0) return [];
+  const categories = await client.getCategories();
+  const resolved: string[] = [];
+  for (const value of values) {
+    if (isUuid(value)) {
+      resolved.push(value);
+      continue;
+    }
+    const matches = categories.filter((category: Category) => category.name.toLowerCase() === value.toLowerCase());
+    if (matches.length === 0) throw new Error(`Paprika category not found: ${value}`);
+    if (matches.length > 1) throw new Error(`Paprika category is ambiguous: ${value}. Use its UID instead.`);
+    resolved.push(matches[0]!.uid);
+  }
+  return [...new Set(resolved)];
+}
+
+function printWritePreview(action: string, recipe: Recipe, json?: boolean): void {
+  if (json) {
+    console.log(JSON.stringify({ action: action.toLowerCase(), dry_run: true, recipe }, null, 2));
+    return;
+  }
+  console.log(`\n${action}: ${style.bold(recipe.name)}`);
+  console.log(style.dim(`UID: ${recipe.uid}`));
+  console.log(style.dim(`Categories: ${recipe.categories.length || "none"}`));
+  console.log(style.dim(`Ingredients: ${recipe.ingredients.split("\n").filter(Boolean).length} lines; directions: ${recipe.directions.split("\n").filter(Boolean).length} lines\n`));
+}
+
+function printWriteSuccess(action: string, recipe: Recipe, json?: boolean): void {
+  if (json) {
+    console.log(JSON.stringify({ action: action.toLowerCase(), recipe }, null, 2));
+    return;
+  }
+  printSuccess(`${action} recipe: ${recipe.name}`);
+  console.log(style.dim(`UID: ${recipe.uid}. Paprika sync has been notified.`));
 }
 
 program.parse();

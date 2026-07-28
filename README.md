@@ -62,6 +62,35 @@ paprika search "chicken"               # Search recipes
 paprika search "quick dinner" --json
 ```
 
+### Create or update recipes
+
+Recipe writes use Paprika's cloud-sync API. They are deliberately preview-only
+unless `--yes` is supplied, so a script or agent cannot create a recipe merely
+by preparing its input.
+
+```bash
+# Inspect the exact recipe that would be created; no cloud change is made.
+paprika recipe-create examples/recipe.json
+
+# Create it and notify Paprika clients to sync.
+paprika recipe-create examples/recipe.json --yes
+
+# Replace a recipe's editable fields from a complete JSON recipe document.
+paprika recipe-update "Example Tomato Pasta" examples/recipe.json
+paprika recipe-update "Example Tomato Pasta" examples/recipe.json --yes
+```
+
+The input must contain `name`, `ingredients`, and `directions`. Optional fields
+include `description`, `notes`, `servings`, `prep_time`, `cook_time`,
+`total_time`, `source`, `source_url`, `image_url`, `rating`, `is_pinned`,
+`on_favorites`, and `categories`. Categories may be category names or UIDs and
+are resolved before saving. See [`examples/recipe.json`](examples/recipe.json).
+
+Recipe photos are intentionally not included in this first write command: the
+sync API uses a separate multipart upload sequence for them. A source URL or
+`image_url` is preserved now; binary photo upload will be added as its own
+verified command rather than quietly getting it wrong.
+
 ### Meal Planning
 
 ```bash

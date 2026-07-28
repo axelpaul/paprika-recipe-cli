@@ -3,7 +3,9 @@
 > **⚠️ Unofficial CLI for Paprika Recipe Manager**  
 > Not affiliated with or endorsed by Hindsight Labs LLC.
 
-A command-line interface for [Paprika Recipe Manager](https://www.paprikaapp.com). Access your recipes, meal plans, and grocery lists from the terminal.
+A command-line interface for [Paprika Recipe Manager](https://www.paprikaapp.com). Access your recipes, meal plans, and grocery lists from the terminal. Recipe create/update commands include an explicit confirmation gate and can attach an embedded recipe photo.
+
+> **API caution:** Paprika does not publish this cloud-sync API as a supported public API. It may change or stop working without notice. Use it with a synced backup of your recipes and review every write preview before supplying `--yes`.
 
 ## Installation
 
@@ -196,7 +198,7 @@ const groceries = await client.getGroceries();
 ## Development
 
 ```bash
-git clone https://github.com/mjrussell/paprika-recipe-cli
+git clone https://github.com/axelpaul/paprika-recipe-cli
 cd paprika-recipe-cli
 npm install
 npm run build
@@ -205,7 +207,7 @@ node dist/cli.js --help
 
 ## License
 
-MIT © [Matt Russell](https://github.com/mjrussell)
+MIT. Originally created by [Matt Russell](https://github.com/mjrussell); this fork is maintained by [Axel Gunnarsson](https://github.com/axelpaul).
 
 ## Disclaimer
 

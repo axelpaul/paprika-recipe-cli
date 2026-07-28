@@ -46,6 +46,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
+    "@bojanrajkovic/mcp-paprika": "^1.6.0",
     "commander": "^13.0.0"
   },
   "devDependencies": {

@@ -4,8 +4,10 @@
  * REST client for Paprika Recipe Manager cloud sync API.
  */
 
-import { createHash, randomUUID } from "node:crypto";
-import { gunzipSync, gzipSync } from "node:zlib";
+import { randomUUID } from "node:crypto";
+import { gunzipSync } from "node:zlib";
+import { PaprikaClient as PaprikaWriteClient } from "@bojanrajkovic/mcp-paprika/dist/paprika/client.js";
+import type { Recipe as PaprikaSyncRecipe } from "@bojanrajkovic/mcp-paprika/dist/paprika/types.js";
 import type {
   PaprikaConfig,
   Recipe,
@@ -17,8 +19,8 @@ import type {
   RecipeInput,
 } from "./types.js";
 
-const BASE_URL = "https://www.paprikaapp.com/api/v2";
-const LOGIN_URL = "https://www.paprikaapp.com/api/v1/account/login/";
+const BASE_URL = "https://paprikaapp.com/api/v2";
+const LOGIN_URL = "https://paprikaapp.com/api/v1/account/login/";
 
 interface LoginResponse {
   result: {
@@ -119,12 +121,16 @@ export class PaprikaClient {
 
   /**
    * Write a recipe using Paprika's private sync protocol. The app expects a
-   * gzipped JSON document in a multipart `data` field, plus a content hash it
-   * uses for change detection.
+   * gzipped JSON document in a multipart `data` field. The server accepts an
+   * empty hash for a new recipe; edits retain the existing server hash.
    */
   private async saveRecipe(recipe: Recipe): Promise<Recipe> {
-    const token = await this.login();
-    const payload = {
+    // Reuse the maintained community sync writer for the fragile write path.
+    // It is the same private API, but has captured wire-level coverage for
+    // Paprika's multipart recipe writes.
+    const client = new PaprikaWriteClient(this.email, this.password);
+    await client.authenticate();
+    await client.saveRecipe({
       uid: recipe.uid,
       hash: recipe.hash,
       name: recipe.name,
@@ -133,40 +139,29 @@ export class PaprikaClient {
       directions: recipe.directions,
       description: recipe.description,
       notes: recipe.notes,
-      nutritional_info: recipe.nutritional_info,
+      prepTime: recipe.prep_time,
+      cookTime: recipe.cook_time,
+      totalTime: recipe.total_time,
       servings: recipe.servings,
       difficulty: recipe.difficulty,
-      prep_time: recipe.prep_time,
-      cook_time: recipe.cook_time,
-      total_time: recipe.total_time,
-      source: recipe.source,
-      source_url: recipe.source_url,
-      image_url: recipe.image_url,
-      photo: recipe.photo,
-      photo_hash: recipe.photo_hash,
-      photo_large: recipe.photo_large,
-      on_favorites: recipe.on_favorites,
-      in_trash: recipe.in_trash,
-      is_pinned: recipe.is_pinned,
-      scale: recipe.scale,
       rating: recipe.rating,
+      created: recipe.created,
+      imageUrl: recipe.image_url,
+      photo: recipe.photo,
+      photoHash: recipe.photo_hash,
+      photoLarge: recipe.photo_large,
+      photoUrl: recipe.photo_url,
+      source: recipe.source,
+      sourceUrl: recipe.source_url,
+      onFavorites: recipe.on_favorites,
+      inTrash: recipe.in_trash,
+      isPinned: recipe.is_pinned,
+      onGroceryList: recipe.on_grocery_list,
+      scale: recipe.scale,
+      nutritionalInfo: recipe.nutritional_info,
       deleted: false,
-    };
-    const form = new FormData();
-    form.append("data", new Blob([gzipSync(JSON.stringify(payload))]), "data.gz");
-    const response = await fetch(`${BASE_URL}/sync/recipe/${recipe.uid}/`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: form,
-    });
-    if (!response.ok) {
-      throw new Error(`API error ${response.status}: ${await response.text()}`);
-    }
-    const parsed = (await response.json()) as ApiResponse<boolean>;
-    if (parsed.error || parsed.result !== true) {
-      throw new Error(`Paprika API error: ${parsed.error?.message ?? "recipe save was not confirmed"}`);
-    }
-    await this.request<unknown>("/sync/notify/", { method: "POST" });
+    } as unknown as PaprikaSyncRecipe);
+    await client.notifySync();
     return recipe;
   }
 
@@ -187,7 +182,7 @@ export class PaprikaClient {
     return this.saveRecipe(recipe);
   }
 
-  /** Builds a write-ready recipe and matches Paprika's client-side hash algorithm. */
+  /** Builds a write-ready recipe without changing the cloud. */
   private recipeFromInput(input: RecipeInput, categories: string[], existing?: Recipe): Recipe {
     const created = existing?.created ?? formatPaprikaDate(new Date());
     const recipe: Recipe = {
@@ -197,17 +192,19 @@ export class PaprikaClient {
       categories,
       ingredients: input.ingredients,
       directions: input.directions,
-      description: input.description ?? existing?.description ?? "",
-      notes: input.notes ?? existing?.notes ?? "",
-      nutritional_info: input.nutritional_info ?? existing?.nutritional_info ?? "",
-      servings: input.servings ?? existing?.servings ?? "",
-      difficulty: input.difficulty ?? existing?.difficulty ?? "",
-      prep_time: input.prep_time ?? existing?.prep_time ?? "",
-      cook_time: input.cook_time ?? existing?.cook_time ?? "",
-      total_time: input.total_time ?? existing?.total_time ?? "",
-      source: input.source ?? existing?.source ?? "",
-      source_url: input.source_url ?? existing?.source_url ?? "",
-      image_url: input.image_url ?? existing?.image_url ?? "",
+      description: input.description ?? existing?.description ?? null,
+      notes: input.notes ?? existing?.notes ?? null,
+      nutritional_info: input.nutritional_info ?? existing?.nutritional_info ?? null,
+      servings: input.servings ?? existing?.servings ?? null,
+      difficulty: input.difficulty ?? existing?.difficulty ?? null,
+      prep_time: input.prep_time ?? existing?.prep_time ?? null,
+      cook_time: input.cook_time ?? existing?.cook_time ?? null,
+      total_time: input.total_time ?? existing?.total_time ?? null,
+      source: input.source ?? existing?.source ?? null,
+      source_url: input.source_url ?? existing?.source_url ?? null,
+      // Paprika distinguishes an absent image from an empty URL; new recipes
+      // must send null here (the desktop app does), not an empty string.
+      image_url: input.image_url ?? existing?.image_url ?? null,
       photo: existing?.photo ?? null,
       photo_hash: existing?.photo_hash ?? null,
       photo_large: existing?.photo_large ?? null,
@@ -220,7 +217,11 @@ export class PaprikaClient {
       created,
       photo_url: existing?.photo_url ?? null,
     };
-    recipe.hash = computeRecipeHash(recipe);
+    // The current sync service accepts an empty hash for a new recipe (as the
+    // desktop client does); for edits retain the server's existing hash. A
+    // guessed hash algorithm is rejected with a generic 500, so do not invent
+    // one here.
+    recipe.hash = existing?.hash ?? "";
     return recipe;
   }
 
@@ -293,7 +294,7 @@ export class PaprikaClient {
     return recipes.filter(
       (r) =>
         r.name.toLowerCase().includes(lowerQuery) ||
-        r.description.toLowerCase().includes(lowerQuery)
+        (r.description ?? "").toLowerCase().includes(lowerQuery)
     );
   }
 
@@ -319,18 +320,4 @@ export class PaprikaClient {
 function formatPaprikaDate(date: Date): string {
   const pad = (value: number) => value.toString().padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-}
-
-/** Matches Paprika.framework's recipe content hash, verified by community clients. */
-export function computeRecipeHash(recipe: Recipe): string {
-  const values: unknown[] = [
-    [...recipe.categories].sort(), recipe.cook_time ?? "", recipe.created, false,
-    recipe.description ?? "", recipe.difficulty ?? "", recipe.directions ?? "", null,
-    recipe.image_url, false, recipe.ingredients ?? "", recipe.is_pinned, recipe.name,
-    recipe.notes ?? "", recipe.nutritional_info ?? "", recipe.on_favorites, recipe.photo,
-    recipe.photo_hash, recipe.photo_large, recipe.prep_time ?? "", recipe.rating, recipe.scale,
-    recipe.servings ?? "", recipe.source ?? "", recipe.source_url ?? "", recipe.total_time ?? "", recipe.uid,
-  ];
-  const json = JSON.stringify(values).replaceAll("/", "\\/");
-  return createHash("sha256").update(json, "utf8").digest("hex").toUpperCase();
 }

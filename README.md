@@ -75,6 +75,9 @@ paprika recipe-create examples/recipe.json
 # Create it and notify Paprika clients to sync.
 paprika recipe-create examples/recipe.json --yes
 
+# Select one recipe from an existing JSON import batch, overriding categories.
+paprika recipe-create data/import-batch.json --index 0 --categories "kloi-import,NYT Cooking,Dinner" --yes
+
 # Replace a recipe's editable fields from a complete JSON recipe document.
 paprika recipe-update "Example Tomato Pasta" examples/recipe.json
 paprika recipe-update "Example Tomato Pasta" examples/recipe.json --yes

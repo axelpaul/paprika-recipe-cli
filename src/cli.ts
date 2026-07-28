@@ -324,14 +324,16 @@ program
   .command("recipe-create")
   .description("Create a recipe from a JSON file (preview by default; use --yes to upload)")
   .argument("<file>", "Recipe JSON file")
+  .option("--index <index>", "Select a recipe from a JSON array (zero-based)", Number.parseInt)
+  .option("--categories <names>", "Comma-separated category names or UIDs; overrides input categories")
   .option("--yes", "Upload the recipe to Paprika cloud sync")
   .option("--json", "Output the resolved recipe as JSON")
-  .action(async (file: string, options: { yes?: boolean; json?: boolean }) => {
+  .action(async (file: string, options: { index?: number; categories?: string; yes?: boolean; json?: boolean }) => {
     const config = requireConfig();
     const client = new PaprikaClient(config);
     try {
-      const input = loadRecipeInput(file);
-      const categoryUids = await resolveCategories(client, input.categories ?? []);
+      const input = loadRecipeInput(file, options.index);
+      const categoryUids = await resolveCategories(client, options.categories ? splitCategories(options.categories) : input.categories ?? []);
       const preview = await client.previewRecipe(input, categoryUids);
       if (!options.yes) {
         printWritePreview("Would create", preview, options.json);
@@ -351,16 +353,18 @@ program
   .description("Replace recipe fields from a JSON file (preview by default; use --yes to upload)")
   .argument("<identifier>", "Recipe UID or exact recipe name")
   .argument("<file>", "Complete replacement recipe JSON file")
+  .option("--index <index>", "Select a recipe from a JSON array (zero-based)", Number.parseInt)
+  .option("--categories <names>", "Comma-separated category names or UIDs; overrides input categories")
   .option("--yes", "Upload the replacement to Paprika cloud sync")
   .option("--json", "Output the resolved recipe as JSON")
-  .action(async (identifier: string, file: string, options: { yes?: boolean; json?: boolean }) => {
+  .action(async (identifier: string, file: string, options: { index?: number; categories?: string; yes?: boolean; json?: boolean }) => {
     const config = requireConfig();
     const client = new PaprikaClient(config);
     try {
-      const input = loadRecipeInput(file);
+      const input = loadRecipeInput(file, options.index);
       const existing = isUuid(identifier) ? await client.getRecipe(identifier) : await client.findRecipeByName(identifier);
       if (!existing) throw new Error(`Recipe not found: ${identifier}`);
-      const categoryUids = await resolveCategories(client, input.categories ?? existing.categories);
+      const categoryUids = await resolveCategories(client, options.categories ? splitCategories(options.categories) : input.categories ?? existing.categories);
       const preview = await client.previewRecipe(input, categoryUids, existing);
       if (!options.yes) {
         printWritePreview("Would update", preview, options.json);
@@ -557,12 +561,18 @@ function printRecipe(recipe: Recipe): void {
   console.log("");
 }
 
-function loadRecipeInput(file: string): RecipeInput {
+function loadRecipeInput(file: string, index?: number): RecipeInput {
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(file, "utf8"));
   } catch (error) {
     throw new Error(`Could not read recipe JSON from ${file}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (Array.isArray(parsed)) {
+    if (!Number.isInteger(index) || index! < 0 || index! >= parsed.length) {
+      throw new Error(`Recipe input is an array; pass --index 0 through ${Math.max(0, parsed.length - 1)} to select one recipe.`);
+    }
+    parsed = parsed[index!];
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("Recipe input must be a JSON object.");
@@ -585,6 +595,12 @@ function loadRecipeInput(file: string): RecipeInput {
   return value as unknown as RecipeInput;
 }
 
+function splitCategories(value: string): string[] {
+  const categories = value.split(",").map((item) => item.trim()).filter(Boolean);
+  if (categories.length === 0) throw new Error("--categories must contain at least one category name or UID.");
+  return categories;
+}
+
 async function resolveCategories(client: PaprikaClient, values: string[]): Promise<string[]> {
   if (values.length === 0) return [];
   const categories = await client.getCategories();
@@ -594,7 +610,12 @@ async function resolveCategories(client: PaprikaClient, values: string[]): Promi
       resolved.push(value);
       continue;
     }
-    const matches = categories.filter((category: Category) => category.name.toLowerCase() === value.toLowerCase());
+    // Prefer an exact label before falling back to case-insensitive matching:
+    // a library can legitimately contain both "Dinner" and "dinner".
+    const exactMatches = categories.filter((category: Category) => category.name === value);
+    const matches = exactMatches.length > 0
+      ? exactMatches
+      : categories.filter((category: Category) => category.name.toLowerCase() === value.toLowerCase());
     if (matches.length === 0) throw new Error(`Paprika category not found: ${value}`);
     if (matches.length > 1) throw new Error(`Paprika category is ambiguous: ${value}. Use its UID instead.`);
     resolved.push(matches[0]!.uid);

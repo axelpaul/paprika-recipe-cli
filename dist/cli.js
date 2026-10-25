@@ -719,11 +719,11 @@ var init_package = __esm({
         node: ">=18"
       },
       scripts: {
-        build: `tsup && node -e "require('fs').chmodSync('dist/cli.js', 0o755)"`,
+        bundle: `tsup && node -e "require('fs').chmodSync('dist/cli.js', 0o755)"`,
         dev: "tsup --watch",
         typecheck: "tsc --noEmit",
         test: "vitest run",
-        check: "npm run typecheck && npm run build && npm test"
+        check: "npm run typecheck && npm run bundle && npm test"
       },
       dependencies: {
         "@modelcontextprotocol/sdk": "^1.32.2",

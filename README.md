@@ -184,7 +184,7 @@ npm run check        # typecheck, build, tests
 node dist/cli.js --help
 ```
 
-`dist/` is committed so `npm install -g github:...` works (npm and Bun do not reliably run build scripts for global git installs). After changing `src/`, run `npm run build` and commit `dist/` too; CI fails if it is stale.
+`dist/` is committed so `npm install -g github:...` works: npm cannot run a `prepare`/`build` step for a global git install (it runs the nested `npm install` in global mode, so devDependencies are missing), and Bun skips it. For the same reason the build script is called `bundle`, not `build` — a `build` script alone makes npm try that broken preparation. After changing `src/`, run `npm run bundle` and commit `dist/`; CI fails if it is stale.
 
 Shared logic used by both the CLI and the MCP server is in `src/core.ts`; tools are in `src/mcp.ts`. The recipe/photo write wire format in `src/sync-write.ts` is adapted from [`@bojanrajkovic/mcp-paprika`](https://github.com/bojanrajkovic/mcp-paprika) (MIT, Bojan Rajkovic). Pushing a `v*` tag builds binaries with `bun build --compile` and publishes a GitHub release.
 

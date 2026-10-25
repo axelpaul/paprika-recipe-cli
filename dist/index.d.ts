@@ -142,6 +142,9 @@ declare class PaprikaClient {
      * empty hash for a new recipe; edits retain the existing server hash.
      */
     private saveRecipe;
+    private postRecipe;
+    /** Ask Paprika to tell the user's other devices to sync. */
+    private notifySync;
     /** Create a new recipe and notify Paprika clients to refresh. */
     createRecipe(input: RecipeInput, categories: string[]): Promise<Recipe>;
     /** Build a write-ready recipe without changing the cloud. */
@@ -153,10 +156,9 @@ declare class PaprikaClient {
     /**
      * Attach an image embedded in a `.paprikarecipes`-style import record.
      * Paprika stores a thumbnail and full JPEG separately, so this intentionally
-     * uses the verified three-request uploader from mcp-paprika.
+     * uses the three-request upload sequence captured from Paprika.app.
      */
     private attachImportedPhoto;
-    private toSyncRecipe;
     /**
      * Get list of all recipe stubs (uid + hash only)
      */

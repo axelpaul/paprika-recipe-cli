@@ -1,8 +1,73 @@
 // src/api.ts
 import { randomUUID } from "crypto";
 import { gunzipSync } from "zlib";
-import { PaprikaClient as PaprikaWriteClient } from "@bojanrajkovic/mcp-paprika/dist/paprika/client.js";
-import { normalizePhoto, sha256Hex } from "@bojanrajkovic/mcp-paprika/dist/tools/photo-helpers.js";
+
+// src/sync-write.ts
+import { createHash } from "crypto";
+import { gzipSync } from "zlib";
+var THUMBNAIL_PX = 280;
+function recipeToApiPayload(recipe) {
+  return {
+    uid: recipe.uid,
+    hash: recipe.hash,
+    name: recipe.name,
+    categories: recipe.categories,
+    ingredients: recipe.ingredients,
+    directions: recipe.directions,
+    description: recipe.description,
+    notes: recipe.notes,
+    prep_time: recipe.prep_time,
+    cook_time: recipe.cook_time,
+    total_time: recipe.total_time,
+    servings: recipe.servings,
+    difficulty: recipe.difficulty,
+    rating: recipe.rating,
+    created: recipe.created,
+    image_url: recipe.image_url,
+    photo: recipe.photo,
+    photo_hash: recipe.photo_hash,
+    photo_large: recipe.photo_large,
+    source: recipe.source,
+    source_url: recipe.source_url,
+    on_favorites: recipe.on_favorites,
+    in_trash: recipe.in_trash,
+    is_pinned: recipe.is_pinned,
+    scale: recipe.scale,
+    nutritional_info: recipe.nutritional_info,
+    deleted: false
+  };
+}
+function entityFormData(payload, filename = "file") {
+  const form = new FormData();
+  form.append("data", new Blob([gzipSync(JSON.stringify(payload))]), filename);
+  return form;
+}
+function photoFormData(payload, image, imageFilename, dataFilename = "file") {
+  const form = entityFormData(payload, dataFilename);
+  form.append("photo_upload", new Blob([new Uint8Array(image)], { type: "image/jpeg" }), imageFilename);
+  return form;
+}
+function sha256Hex(bytes) {
+  return createHash("sha256").update(bytes).digest("hex").toUpperCase();
+}
+async function normalizePhoto(input) {
+  let sharp;
+  try {
+    sharp = (await import("sharp")).default;
+  } catch (error) {
+    throw new Error(
+      `the sharp image library is not available (${error instanceof Error ? error.message : String(error)})`
+    );
+  }
+  const base = sharp(input).rotate();
+  const [full, thumbnail] = await Promise.all([
+    base.clone().jpeg({ quality: 85 }).toBuffer(),
+    base.clone().resize(THUMBNAIL_PX, THUMBNAIL_PX, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer()
+  ]);
+  return { thumbnail, full };
+}
+
+// src/api.ts
 var BASE_URL = "https://paprikaapp.com/api/v2";
 var LOGIN_URL = "https://paprikaapp.com/api/v1/account/login/";
 var PaprikaClient = class {
@@ -39,7 +104,7 @@ var PaprikaClient = class {
     this.token = data.result.token;
     return this.token;
   }
-  async request(endpoint, options = {}) {
+  async request(endpoint, options = {}, retried = false) {
     const token = await this.login();
     const url = `${BASE_URL}${endpoint}`;
     const headers = {
@@ -50,6 +115,10 @@ var PaprikaClient = class {
       ...options,
       headers
     });
+    if (response.status === 401 && !retried) {
+      this.token = null;
+      return this.request(endpoint, options, true);
+    }
     if (!response.ok) {
       const text = await response.text();
       throw new Error(`API error ${response.status}: ${text}`);
@@ -74,41 +143,19 @@ var PaprikaClient = class {
    * empty hash for a new recipe; edits retain the existing server hash.
    */
   async saveRecipe(recipe) {
-    const client = new PaprikaWriteClient(this.email, this.password);
-    await client.authenticate();
-    await client.saveRecipe({
-      uid: recipe.uid,
-      hash: recipe.hash,
-      name: recipe.name,
-      categories: recipe.categories,
-      ingredients: recipe.ingredients,
-      directions: recipe.directions,
-      description: recipe.description,
-      notes: recipe.notes,
-      prepTime: recipe.prep_time,
-      cookTime: recipe.cook_time,
-      totalTime: recipe.total_time,
-      servings: recipe.servings,
-      difficulty: recipe.difficulty,
-      rating: recipe.rating,
-      created: recipe.created,
-      imageUrl: recipe.image_url,
-      photo: recipe.photo,
-      photoHash: recipe.photo_hash,
-      photoLarge: recipe.photo_large,
-      photoUrl: recipe.photo_url,
-      source: recipe.source,
-      sourceUrl: recipe.source_url,
-      onFavorites: recipe.on_favorites,
-      inTrash: recipe.in_trash,
-      isPinned: recipe.is_pinned,
-      onGroceryList: recipe.on_grocery_list,
-      scale: recipe.scale,
-      nutritionalInfo: recipe.nutritional_info,
-      deleted: false
-    });
-    await client.notifySync();
+    await this.postRecipe(recipe);
+    await this.notifySync();
     return recipe;
+  }
+  async postRecipe(recipe, form) {
+    await this.request(`/sync/recipe/${recipe.uid}/`, {
+      method: "POST",
+      body: form ?? entityFormData(recipeToApiPayload(recipe), "data.gz")
+    });
+  }
+  /** Ask Paprika to tell the user's other devices to sync. */
+  async notifySync() {
+    await this.request("/sync/notify/", { method: "POST" });
   }
   /** Create a new recipe and notify Paprika clients to refresh. */
   async createRecipe(input, categories) {
@@ -169,7 +216,7 @@ var PaprikaClient = class {
   /**
    * Attach an image embedded in a `.paprikarecipes`-style import record.
    * Paprika stores a thumbnail and full JPEG separately, so this intentionally
-   * uses the verified three-request uploader from mcp-paprika.
+   * uses the three-request upload sequence captured from Paprika.app.
    */
   async attachImportedPhoto(recipe, photo) {
     if (!photo || recipe.photo) return recipe;
@@ -182,57 +229,24 @@ var PaprikaClient = class {
       photo_large: `${photoUid}.jpg`,
       photo_hash: sha256Hex(thumbnail)
     };
-    const client = new PaprikaWriteClient(this.email, this.password);
-    await client.authenticate();
-    await client.uploadPhoto(
-      this.toSyncRecipe(recipeWithPhoto),
-      {
-        uid: photoUid,
-        recipeUid: recipe.uid,
-        filename: `${photoUid}.jpg`,
-        name: "1",
-        orderFlag: 0,
-        hash: sha256Hex(full),
-        deleted: false
-      },
-      thumbnail,
-      full
-    );
-    await client.notifySync();
-    return recipeWithPhoto;
-  }
-  toSyncRecipe(recipe) {
-    return {
-      uid: recipe.uid,
-      hash: recipe.hash,
-      name: recipe.name,
-      categories: recipe.categories,
-      ingredients: recipe.ingredients,
-      directions: recipe.directions,
-      description: recipe.description,
-      notes: recipe.notes,
-      prepTime: recipe.prep_time,
-      cookTime: recipe.cook_time,
-      totalTime: recipe.total_time,
-      servings: recipe.servings,
-      difficulty: recipe.difficulty,
-      rating: recipe.rating,
-      created: recipe.created,
-      imageUrl: recipe.image_url,
-      photo: recipe.photo,
-      photoHash: recipe.photo_hash,
-      photoLarge: recipe.photo_large,
-      photoUrl: recipe.photo_url,
-      source: recipe.source,
-      sourceUrl: recipe.source_url,
-      onFavorites: recipe.on_favorites,
-      inTrash: recipe.in_trash,
-      isPinned: recipe.is_pinned,
-      onGroceryList: recipe.on_grocery_list,
-      scale: recipe.scale,
-      nutritionalInfo: recipe.nutritional_info,
+    const photoEntity = {
+      uid: photoUid,
+      recipe_uid: recipe.uid,
+      filename: `${photoUid}.jpg`,
+      name: "1",
+      order_flag: 0,
+      hash: sha256Hex(full),
       deleted: false
     };
+    const recipePayload = recipeToApiPayload(recipeWithPhoto);
+    await this.postRecipe(recipeWithPhoto, photoFormData(recipePayload, thumbnail, recipeWithPhoto.photo, "data.gz"));
+    await this.request(`/sync/photo/${photoUid}/`, {
+      method: "POST",
+      body: photoFormData(photoEntity, full, photoEntity.filename, "file")
+    });
+    await this.postRecipe(recipeWithPhoto);
+    await this.notifySync();
+    return recipeWithPhoto;
   }
   /**
    * Get list of all recipe stubs (uid + hash only)
@@ -316,7 +330,7 @@ async function preparePhoto(recipe, photoData) {
     return await normalizePhoto(bytes);
   } catch (error) {
     throw new Error(
-      `Could not process photo_data (${error instanceof Error ? error.message : String(error)}). Photo upload needs the sharp image library, which prebuilt binaries do not include; install with npm to attach photos.`
+      `Could not process photo_data (${error instanceof Error ? error.message : String(error)}). Photo upload needs the optional sharp image library, which prebuilt binaries do not include; install with npm to attach photos.`
     );
   }
 }
@@ -621,7 +635,6 @@ var package_default = {
     check: "npm run typecheck && npm run build && npm test"
   },
   dependencies: {
-    "@bojanrajkovic/mcp-paprika": "^1.6.0",
     "@modelcontextprotocol/sdk": "^1.32.2",
     commander: "^13.0.0",
     zod: "^3.25.76"
@@ -631,6 +644,9 @@ var package_default = {
     tsup: "^8.3.5",
     typescript: "^5.7.0",
     vitest: "^3.2.7"
+  },
+  optionalDependencies: {
+    sharp: "^0.34.5"
   }
 };
 

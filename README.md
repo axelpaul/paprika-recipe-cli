@@ -10,7 +10,7 @@ Originally created by [Matt Russell](https://github.com/mjrussell); this fork (w
 
 ## Install
 
-Requires [Node.js](https://nodejs.org) 18 or newer (22+ recommended) and npm.
+Requires [Node.js](https://nodejs.org) 18 or newer and npm. Photo upload uses the optional native `sharp` library, which npm installs automatically on supported platforms.
 
 ```sh
 npm install -g github:axelpaul/paprika-recipe-cli   # install
@@ -26,6 +26,8 @@ With [Bun](https://bun.sh) (≥ 1.1) instead:
 bun add -g github:axelpaul/paprika-recipe-cli   # install / update
 bun remove -g paprika-recipe-cli                 # uninstall
 ```
+
+The command still runs on Node (`#!/usr/bin/env node`). Bun blocks `sharp`'s install script by default, so photo upload may need `bun pm -g trust sharp`.
 
 **Prebuilt binaries:** download `paprika-<os>-<arch>` for Linux, macOS or Windows from the [Releases page](https://github.com/axelpaul/paprika-recipe-cli/releases), check it against `SHA256SUMS`, make it executable and put it on your `PATH`. The binaries do everything except attaching a photo from `photo_data` (that needs the native `sharp` image library; use the npm install for it).
 
@@ -184,7 +186,7 @@ node dist/cli.js --help
 
 `dist/` is committed so `npm install -g github:...` works (npm and Bun do not reliably run build scripts for global git installs). After changing `src/`, run `npm run build` and commit `dist/` too; CI fails if it is stale.
 
-Shared logic used by both the CLI and the MCP server is in `src/core.ts`; tools are in `src/mcp.ts`. Recipe writes and photo uploads reuse the sync client from [`@bojanrajkovic/mcp-paprika`](https://github.com/bojanrajkovic/mcp-paprika). Pushing a `v*` tag builds binaries with `bun build --compile` and publishes a GitHub release.
+Shared logic used by both the CLI and the MCP server is in `src/core.ts`; tools are in `src/mcp.ts`. The recipe/photo write wire format in `src/sync-write.ts` is adapted from [`@bojanrajkovic/mcp-paprika`](https://github.com/bojanrajkovic/mcp-paprika) (MIT, Bojan Rajkovic). Pushing a `v*` tag builds binaries with `bun build --compile` and publishes a GitHub release.
 
 ## License
 

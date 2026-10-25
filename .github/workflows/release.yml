@@ -32,7 +32,7 @@ jobs:
           for target in linux-x64 linux-arm64 darwin-x64 darwin-arm64 windows-x64; do
             ext=""
             if [ "${target%%-*}" = "windows" ]; then ext=".exe"; fi
-            bun build --compile --minify --target="bun-${target}" src/cli.ts --outfile "release/paprika-${target}${ext}"
+            bun build --compile --minify --external sharp --target="bun-${target}" src/cli.ts --outfile "release/paprika-${target}${ext}"
           done
           cd release
           sha256sum paprika-* > SHA256SUMS

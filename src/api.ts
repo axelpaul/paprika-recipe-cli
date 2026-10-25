@@ -6,9 +6,14 @@
 
 import { randomUUID } from "node:crypto";
 import { gunzipSync } from "node:zlib";
-import { PaprikaClient as PaprikaWriteClient } from "@bojanrajkovic/mcp-paprika/dist/paprika/client.js";
-import type { Recipe as PaprikaSyncRecipe } from "@bojanrajkovic/mcp-paprika/dist/paprika/types.js";
-import { normalizePhoto, sha256Hex } from "@bojanrajkovic/mcp-paprika/dist/tools/photo-helpers.js";
+import {
+  entityFormData,
+  normalizePhoto,
+  photoFormData,
+  recipeToApiPayload,
+  sha256Hex,
+  type PhotoEntity,
+} from "./sync-write.js";
 import type {
   PaprikaConfig,
   Recipe,
@@ -77,7 +82,8 @@ export class PaprikaClient {
 
   private async request<T>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    retried = false
   ): Promise<T> {
     // Ensure we have a token
     const token = await this.login();
@@ -92,6 +98,12 @@ export class PaprikaClient {
       ...options,
       headers,
     });
+
+    if (response.status === 401 && !retried) {
+      // A stored token may have expired; log in again once.
+      this.token = null;
+      return this.request<T>(endpoint, options, true);
+    }
 
     if (!response.ok) {
       const text = await response.text();
@@ -126,44 +138,23 @@ export class PaprikaClient {
    * empty hash for a new recipe; edits retain the existing server hash.
    */
   private async saveRecipe(recipe: Recipe): Promise<Recipe> {
-    // Reuse the maintained community sync writer for the fragile write path.
-    // It is the same private API, but has captured wire-level coverage for
-    // Paprika's multipart recipe writes.
-    const client = new PaprikaWriteClient(this.email, this.password);
-    await client.authenticate();
-    await client.saveRecipe({
-      uid: recipe.uid,
-      hash: recipe.hash,
-      name: recipe.name,
-      categories: recipe.categories,
-      ingredients: recipe.ingredients,
-      directions: recipe.directions,
-      description: recipe.description,
-      notes: recipe.notes,
-      prepTime: recipe.prep_time,
-      cookTime: recipe.cook_time,
-      totalTime: recipe.total_time,
-      servings: recipe.servings,
-      difficulty: recipe.difficulty,
-      rating: recipe.rating,
-      created: recipe.created,
-      imageUrl: recipe.image_url,
-      photo: recipe.photo,
-      photoHash: recipe.photo_hash,
-      photoLarge: recipe.photo_large,
-      photoUrl: recipe.photo_url,
-      source: recipe.source,
-      sourceUrl: recipe.source_url,
-      onFavorites: recipe.on_favorites,
-      inTrash: recipe.in_trash,
-      isPinned: recipe.is_pinned,
-      onGroceryList: recipe.on_grocery_list,
-      scale: recipe.scale,
-      nutritionalInfo: recipe.nutritional_info,
-      deleted: false,
-    } as unknown as PaprikaSyncRecipe);
-    await client.notifySync();
+    // Wire format adapted from @bojanrajkovic/mcp-paprika (captured from
+    // Paprika.app): see sync-write.ts.
+    await this.postRecipe(recipe);
+    await this.notifySync();
     return recipe;
+  }
+
+  private async postRecipe(recipe: Recipe, form?: FormData): Promise<void> {
+    await this.request<boolean>(`/sync/recipe/${recipe.uid}/`, {
+      method: "POST",
+      body: form ?? entityFormData(recipeToApiPayload(recipe), "data.gz"),
+    });
+  }
+
+  /** Ask Paprika to tell the user's other devices to sync. */
+  private async notifySync(): Promise<void> {
+    await this.request<unknown>("/sync/notify/", { method: "POST" });
   }
 
   /** Create a new recipe and notify Paprika clients to refresh. */
@@ -235,7 +226,7 @@ export class PaprikaClient {
   /**
    * Attach an image embedded in a `.paprikarecipes`-style import record.
    * Paprika stores a thumbnail and full JPEG separately, so this intentionally
-   * uses the verified three-request uploader from mcp-paprika.
+   * uses the three-request upload sequence captured from Paprika.app.
    */
   private async attachImportedPhoto(recipe: Recipe, photo: PreparedPhoto | null): Promise<Recipe> {
     if (!photo || recipe.photo) return recipe;
@@ -248,58 +239,26 @@ export class PaprikaClient {
       photo_large: `${photoUid}.jpg`,
       photo_hash: sha256Hex(thumbnail),
     };
-    const client = new PaprikaWriteClient(this.email, this.password);
-    await client.authenticate();
-    await client.uploadPhoto(
-      this.toSyncRecipe(recipeWithPhoto),
-      {
-        uid: photoUid as never,
-        recipeUid: recipe.uid as never,
-        filename: `${photoUid}.jpg`,
-        name: "1",
-        orderFlag: 0,
-        hash: sha256Hex(full),
-        deleted: false,
-      },
-      thumbnail,
-      full,
-    );
-    await client.notifySync();
-    return recipeWithPhoto;
-  }
-
-  private toSyncRecipe(recipe: Recipe): PaprikaSyncRecipe {
-    return {
-      uid: recipe.uid,
-      hash: recipe.hash,
-      name: recipe.name,
-      categories: recipe.categories,
-      ingredients: recipe.ingredients,
-      directions: recipe.directions,
-      description: recipe.description,
-      notes: recipe.notes,
-      prepTime: recipe.prep_time,
-      cookTime: recipe.cook_time,
-      totalTime: recipe.total_time,
-      servings: recipe.servings,
-      difficulty: recipe.difficulty,
-      rating: recipe.rating,
-      created: recipe.created,
-      imageUrl: recipe.image_url,
-      photo: recipe.photo,
-      photoHash: recipe.photo_hash,
-      photoLarge: recipe.photo_large,
-      photoUrl: recipe.photo_url,
-      source: recipe.source,
-      sourceUrl: recipe.source_url,
-      onFavorites: recipe.on_favorites,
-      inTrash: recipe.in_trash,
-      isPinned: recipe.is_pinned,
-      onGroceryList: recipe.on_grocery_list,
-      scale: recipe.scale,
-      nutritionalInfo: recipe.nutritional_info,
+    const photoEntity: PhotoEntity = {
+      uid: photoUid,
+      recipe_uid: recipe.uid,
+      filename: `${photoUid}.jpg`,
+      name: "1",
+      order_flag: 0,
+      hash: sha256Hex(full),
       deleted: false,
-    } as unknown as PaprikaSyncRecipe;
+    };
+    // Paprika.app's three-request sequence: recipe + thumbnail, photo entity +
+    // full image, then the recipe again as a confirm step.
+    const recipePayload = recipeToApiPayload(recipeWithPhoto);
+    await this.postRecipe(recipeWithPhoto, photoFormData(recipePayload, thumbnail, recipeWithPhoto.photo!, "data.gz"));
+    await this.request<boolean>(`/sync/photo/${photoUid}/`, {
+      method: "POST",
+      body: photoFormData(photoEntity, full, photoEntity.filename, "file"),
+    });
+    await this.postRecipe(recipeWithPhoto);
+    await this.notifySync();
+    return recipeWithPhoto;
   }
 
   /**
@@ -410,7 +369,7 @@ async function preparePhoto(recipe: Recipe, photoData?: string): Promise<Prepare
   } catch (error) {
     throw new Error(
       `Could not process photo_data (${error instanceof Error ? error.message : String(error)}). ` +
-        "Photo upload needs the sharp image library, which prebuilt binaries do not include; install with npm to attach photos.",
+        "Photo upload needs the optional sharp image library, which prebuilt binaries do not include; install with npm to attach photos.",
     );
   }
 }

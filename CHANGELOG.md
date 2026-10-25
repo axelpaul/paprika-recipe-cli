@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Dropped the `@bojanrajkovic/mcp-paprika` dependency (and its large
+  dependency tree, which also broke `npm install -g` from GitHub); the recipe
+  and photo write wire format is now adapted in `src/sync-write.ts`. `sharp` is
+  an optional dependency used only for photo upload.
+- An expired stored token is refreshed automatically (one re-login on HTTP 401).
 - Config now lives in `$XDG_CONFIG_HOME/paprika-recipe-cli/config.json`
   (default `~/.config/paprika-recipe-cli/`); the old `~/.config/paprika-cli/`
   file is still read.

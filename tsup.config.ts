@@ -9,4 +9,6 @@ export default defineConfig({
   splitting: false,
   sourcemap: false,
   shims: true,
+  // Optional native dependency, loaded lazily at runtime for photo uploads.
+  external: ["sharp"],
 });

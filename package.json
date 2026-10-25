@@ -46,12 +46,11 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\"",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "npm run typecheck && npm run build && npm test",
-    "prepare": "npm run build"
+    "check": "npm run typecheck && npm run build && npm test"
   },
   "dependencies": {
     "@bojanrajkovic/mcp-paprika": "^1.6.0",

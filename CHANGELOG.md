@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PAPRIKA_MCP_ENABLE_WRITES=1` (preview unless `confirm: true`).
 - `recipe-create` / `recipe-update` commands with an explicit `--yes` gate and
   embedded photo upload.
-- `prepare` script so `npm install -g github:axelpaul/paprika-recipe-cli` builds `dist/`.
+- Built `dist/` is committed so `npm install -g github:axelpaul/paprika-recipe-cli`
+  works without a build step (CI checks it is up to date).
 - Tests (vitest) and a tag-triggered release workflow with prebuilt binaries.
 
 ### Changed

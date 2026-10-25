@@ -18,7 +18,7 @@ npm install -g github:axelpaul/paprika-recipe-cli   # update (re-run; pulls late
 npm uninstall -g paprika-recipe-cli                  # uninstall
 ```
 
-The install builds `dist/` from source via the `prepare` script, so it takes a few seconds.
+The built JavaScript in `dist/` is committed, so installing from GitHub needs no build step.
 
 With [Bun](https://bun.sh) (≥ 1.1) instead:
 
@@ -177,10 +177,12 @@ const groceries = await client.getGroceries();
 ```sh
 git clone https://github.com/axelpaul/paprika-recipe-cli
 cd paprika-recipe-cli
-npm install          # also builds dist/ via prepare
+npm install
 npm run check        # typecheck, build, tests
 node dist/cli.js --help
 ```
+
+`dist/` is committed so `npm install -g github:...` works (npm and Bun do not reliably run build scripts for global git installs). After changing `src/`, run `npm run build` and commit `dist/` too; CI fails if it is stale.
 
 Shared logic used by both the CLI and the MCP server is in `src/core.ts`; tools are in `src/mcp.ts`. Recipe writes and photo uploads reuse the sync client from [`@bojanrajkovic/mcp-paprika`](https://github.com/bojanrajkovic/mcp-paprika). Pushing a `v*` tag builds binaries with `bun build --compile` and publishes a GitHub release.
 

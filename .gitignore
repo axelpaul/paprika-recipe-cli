@@ -1,8 +1,7 @@
 # Dependencies
 node_modules/
 
-# Build output
-dist/
+# Build output (dist/ is committed so git installs work without a build step)
 
 # Logs
 *.log

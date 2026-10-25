@@ -7,6 +7,6 @@ export default defineConfig({
   clean: true,
   target: "node18",
   splitting: false,
-  sourcemap: true,
+  sourcemap: false,
   shims: true,
 });

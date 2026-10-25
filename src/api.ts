@@ -57,7 +57,7 @@ export class PaprikaClient {
       return this.token;
     }
 
-    const response = await fetch(LOGIN_URL, {
+    const response = await fetchPaprika(LOGIN_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -94,7 +94,7 @@ export class PaprikaClient {
       ...(options.headers as Record<string, string> | undefined),
     };
 
-    const response = await fetch(url, {
+    const response = await fetchPaprika(url, {
       ...options,
       headers,
     });
@@ -350,6 +350,16 @@ export class PaprikaClient {
       r.name.toLowerCase().includes(lowerName)
     );
     return partial ?? null;
+  }
+}
+
+/** fetch() with the network-level cause in the error message (Node only says "fetch failed"). */
+async function fetchPaprika(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (error) {
+    const cause = error instanceof Error && error.cause instanceof Error ? `: ${error.cause.message}` : "";
+    throw new Error(`Could not reach ${new URL(url).host}${cause}`);
   }
 }
 

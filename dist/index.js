@@ -86,7 +86,7 @@ var PaprikaClient = class {
     if (this.token) {
       return this.token;
     }
-    const response = await fetch(LOGIN_URL, {
+    const response = await fetchPaprika(LOGIN_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded"
@@ -111,7 +111,7 @@ var PaprikaClient = class {
       Authorization: `Bearer ${token}`,
       ...options.headers
     };
-    const response = await fetch(url, {
+    const response = await fetchPaprika(url, {
       ...options,
       headers
     });
@@ -321,6 +321,14 @@ var PaprikaClient = class {
     return partial ?? null;
   }
 };
+async function fetchPaprika(url, init) {
+  try {
+    return await fetch(url, init);
+  } catch (error) {
+    const cause = error instanceof Error && error.cause instanceof Error ? `: ${error.cause.message}` : "";
+    throw new Error(`Could not reach ${new URL(url).host}${cause}`);
+  }
+}
 async function preparePhoto(recipe, photoData) {
   if (!photoData || recipe.photo) return null;
   const encoded = photoData.replace(/^data:[^;]+;base64,/i, "");

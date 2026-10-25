@@ -11,25 +11,41 @@ import type { PaprikaConfig } from "./types.js";
 import { ExitCode } from "./types.js";
 import { printError } from "./output.js";
 
-const CONFIG_DIR = join(homedir(), ".config", "paprika-cli");
-const CONFIG_FILE = join(CONFIG_DIR, "config.json");
+function configBase(): string {
+  const xdg = process.env["XDG_CONFIG_HOME"];
+  return xdg && xdg.trim() ? xdg : join(homedir(), ".config");
+}
+
+function configDir(): string {
+  return join(configBase(), "paprika-recipe-cli");
+}
+
+function configFile(): string {
+  return join(configDir(), "config.json");
+}
+
+/** Pre-0.2 location; still read (never written) so existing logins keep working. */
+function legacyConfigFile(): string {
+  return join(configBase(), "paprika-cli", "config.json");
+}
 
 /**
  * Get the path to the config file
  */
 export function getConfigPath(): string {
-  return CONFIG_FILE;
+  return configFile();
 }
 
 /**
  * Load config from file
  */
 export function loadConfig(): PaprikaConfig | null {
-  if (!existsSync(CONFIG_FILE)) {
+  const file = existsSync(configFile()) ? configFile() : legacyConfigFile();
+  if (!existsSync(file)) {
     return null;
   }
   try {
-    const data = readFileSync(CONFIG_FILE, "utf-8");
+    const data = readFileSync(file, "utf-8");
     return JSON.parse(data) as PaprikaConfig;
   } catch {
     return null;
@@ -53,10 +69,10 @@ export function loadConfigFromEnv(): PaprikaConfig | null {
  * Save config to file
  */
 export function saveConfig(config: PaprikaConfig): void {
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true });
+  if (!existsSync(configDir())) {
+    mkdirSync(configDir(), { recursive: true });
   }
-  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), {
+  writeFileSync(configFile(), JSON.stringify(config, null, 2), {
     mode: 0o600, // read/write for owner only
   });
 }
@@ -65,9 +81,23 @@ export function saveConfig(config: PaprikaConfig): void {
  * Clear stored config
  */
 export function clearConfig(): void {
-  if (existsSync(CONFIG_FILE)) {
-    unlinkSync(CONFIG_FILE);
+  for (const file of [configFile(), legacyConfigFile()]) {
+    if (existsSync(file)) {
+      unlinkSync(file);
+    }
   }
+}
+
+/**
+ * Get config, preferring env vars over file. Returns null (never exits) when
+ * no credentials are configured; used by the MCP server.
+ */
+export function findConfig(): { config: PaprikaConfig; source: "env" | "file" } | null {
+  const envConfig = loadConfigFromEnv();
+  if (envConfig) return { config: envConfig, source: "env" };
+  const fileConfig = loadConfig();
+  if (fileConfig?.email && fileConfig?.password) return { config: fileConfig, source: "file" };
+  return null;
 }
 
 /**
@@ -75,16 +105,9 @@ export function clearConfig(): void {
  * Exits with appropriate code if not configured
  */
 export function requireConfig(): PaprikaConfig {
-  // Try env vars first (higher precedence)
-  const envConfig = loadConfigFromEnv();
-  if (envConfig) {
-    return envConfig;
-  }
-
-  // Fall back to file
-  const fileConfig = loadConfig();
-  if (fileConfig?.email && fileConfig?.password) {
-    return fileConfig;
+  const found = findConfig();
+  if (found) {
+    return found.config;
   }
 
   printError("Not authenticated. Run: paprika auth");

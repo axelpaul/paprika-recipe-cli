@@ -8,3 +8,5 @@ export { PaprikaClient } from "./api.js";
 export { loadConfig, saveConfig, requireConfig, getConfigPath } from "./config.js";
 export type { PaprikaConfig } from "./types.js";
 export * from "./types.js";
+export { createServer, serveStdio, WRITES_ENV_VAR } from "./mcp.js";
+export { VERSION } from "./version.js";

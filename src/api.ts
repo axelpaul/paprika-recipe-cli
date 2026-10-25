@@ -169,8 +169,11 @@ export class PaprikaClient {
   /** Create a new recipe and notify Paprika clients to refresh. */
   async createRecipe(input: RecipeInput, categories: string[]): Promise<Recipe> {
     const recipe = this.recipeFromInput(input, categories);
+    // Decode the photo before writing anything so a bad image cannot leave a
+    // half-finished recipe behind.
+    const photo = await preparePhoto(recipe, input.photo_data);
     const saved = await this.saveRecipe(recipe);
-    return this.attachImportedPhoto(saved, input.photo_data);
+    return this.attachImportedPhoto(saved, photo);
   }
 
   /** Build a write-ready recipe without changing the cloud. */
@@ -181,8 +184,9 @@ export class PaprikaClient {
   /** Update an existing recipe, preserving its fields unless input overrides them. */
   async updateRecipe(existing: Recipe, input: RecipeInput, categories: string[]): Promise<Recipe> {
     const recipe = this.recipeFromInput(input, categories, existing);
+    const photo = await preparePhoto(recipe, input.photo_data);
     const saved = await this.saveRecipe(recipe);
-    return this.attachImportedPhoto(saved, input.photo_data);
+    return this.attachImportedPhoto(saved, photo);
   }
 
   /** Builds a write-ready recipe without changing the cloud. */
@@ -233,13 +237,9 @@ export class PaprikaClient {
    * Paprika stores a thumbnail and full JPEG separately, so this intentionally
    * uses the verified three-request uploader from mcp-paprika.
    */
-  private async attachImportedPhoto(recipe: Recipe, photoData?: string): Promise<Recipe> {
-    if (!photoData || recipe.photo) return recipe;
-    const encoded = photoData.replace(/^data:[^;]+;base64,/i, "");
-    const bytes = Buffer.from(encoded, "base64");
-    if (bytes.length === 0) throw new Error("photo_data is empty or invalid base64.");
-
-    const { thumbnail, full } = await normalizePhoto(bytes);
+  private async attachImportedPhoto(recipe: Recipe, photo: PreparedPhoto | null): Promise<Recipe> {
+    if (!photo || recipe.photo) return recipe;
+    const { thumbnail, full } = photo;
     const photoUid = randomUUID().toUpperCase();
     const thumbnailUid = randomUUID().toUpperCase();
     const recipeWithPhoto: Recipe = {
@@ -391,6 +391,27 @@ export class PaprikaClient {
       r.name.toLowerCase().includes(lowerName)
     );
     return partial ?? null;
+  }
+}
+
+interface PreparedPhoto {
+  thumbnail: Buffer;
+  full: Buffer;
+}
+
+/** Decode and normalise `photo_data`, or null when there is nothing to attach. */
+async function preparePhoto(recipe: Recipe, photoData?: string): Promise<PreparedPhoto | null> {
+  if (!photoData || recipe.photo) return null;
+  const encoded = photoData.replace(/^data:[^;]+;base64,/i, "");
+  const bytes = Buffer.from(encoded, "base64");
+  if (bytes.length === 0) throw new Error("photo_data is empty or invalid base64.");
+  try {
+    return await normalizePhoto(bytes);
+  } catch (error) {
+    throw new Error(
+      `Could not process photo_data (${error instanceof Error ? error.message : String(error)}). ` +
+        "Photo upload needs the sharp image library, which prebuilt binaries do not include; install with npm to attach photos.",
+    );
   }
 }
 

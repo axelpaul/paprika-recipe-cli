@@ -1,8 +1,14 @@
 {
   "name": "paprika-recipe-cli",
-  "version": "0.1.0",
-  "description": "Unofficial Paprika Recipe Manager CLI with safe recipe sync and photo upload",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Unofficial Paprika Recipe Manager CLI and MCP server with safe recipe sync and photo upload",
   "license": "MIT",
+  "author": "Matt Russell (original author); fork maintained by Axel Paul Gunnarsson",
+  "contributors": [
+    "Matt Russell (https://github.com/mjrussell)",
+    "Axel Paul Gunnarsson (https://github.com/axelpaul)"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/axelpaul/paprika-recipe-cli"
@@ -18,7 +24,8 @@
     "cooking",
     "meal-planning",
     "grocery",
-    "unofficial"
+    "unofficial",
+    "mcp"
   ],
   "type": "module",
   "exports": {
@@ -42,15 +49,20 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run build"
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run build && npm test",
+    "prepare": "npm run build"
   },
   "dependencies": {
     "@bojanrajkovic/mcp-paprika": "^1.6.0",
-    "commander": "^13.0.0"
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "commander": "^13.0.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "tsup": "^8.3.5",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.7"
   }
 }

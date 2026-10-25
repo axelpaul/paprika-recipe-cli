@@ -5,7 +5,6 @@
  */
 
 import { Command } from "commander";
-import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { PaprikaClient } from "./api.js";
 import {
@@ -15,11 +14,23 @@ import {
   getConfigPath,
   clearConfig,
 } from "./config.js";
-import type { Recipe, Meal, RecipeInput, Category } from "./types.js";
+import {
+  MEAL_TYPES,
+  createRecipe,
+  findRecipe,
+  listGroceries,
+  listMeals,
+  listRecipes,
+  loadRecipeInput,
+  searchRecipes,
+  splitCategories,
+  updateRecipe,
+  type WriteResult,
+} from "./core.js";
+import type { Recipe, Meal } from "./types.js";
 import { ExitCode } from "./types.js";
 import { setNoColor, printError, printSuccess, style } from "./output.js";
-
-const VERSION = "0.1.0";
+import { VERSION } from "./version.js";
 
 const program = new Command();
 
@@ -189,16 +200,7 @@ program
       if (!options.json) {
         console.log("Fetching recipes...");
       }
-      const recipes = await client.getAllRecipes();
-      let active = recipes.filter((r) => !r.in_trash);
-
-      // Filter by category if specified
-      if (options.category) {
-        const categoryLower = options.category.toLowerCase();
-        active = active.filter((r) =>
-          r.categories.some((c) => c.toLowerCase().includes(categoryLower))
-        );
-      }
+      const active = await listRecipes(client, options.category);
 
       if (options.json) {
         console.log(JSON.stringify(active, null, 2));
@@ -221,15 +223,6 @@ program
     }
   });
 
-/**
- * Check if a string looks like a UUID
- */
-function isUuid(str: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-    str
-  );
-}
-
 program
   .command("recipe")
   .description("Get a recipe by UID or name")
@@ -245,24 +238,10 @@ program
       const client = new PaprikaClient(config);
 
       try {
-        let recipe: Recipe | null = null;
-
-        // If it looks like a UUID, try fetching directly first
-        if (isUuid(identifier)) {
-          try {
-            recipe = await client.getRecipe(identifier);
-          } catch {
-            // UID not found, fall through to name search
-          }
+        if (!options.json) {
+          console.log("Searching recipes...");
         }
-
-        // If not found by UID, search by name
-        if (!recipe) {
-          if (!options.json) {
-            console.log("Searching recipes...");
-          }
-          recipe = await client.findRecipeByName(identifier);
-        }
+        const recipe = await findRecipe(client, identifier);
 
         if (!recipe) {
           printError(`Recipe not found: ${identifier}`);
@@ -297,8 +276,7 @@ program
       if (!options.json) {
         console.log("Searching recipes...");
       }
-      const recipes = await client.searchRecipes(query);
-      const active = recipes.filter((r) => !r.in_trash);
+      const active = await searchRecipes(client, query);
 
       if (options.json) {
         console.log(JSON.stringify(active, null, 2));
@@ -333,15 +311,11 @@ program
     const client = new PaprikaClient(config);
     try {
       const input = loadRecipeInput(file, options.index);
-      const categoryUids = await resolveCategories(client, options.categories ? splitCategories(options.categories) : input.categories ?? []);
-      const preview = await client.previewRecipe(input, categoryUids);
-      if (!options.yes) {
-        printWritePreview("Would create", preview, options.json);
-        if (!options.json) console.log(style.dim("No cloud changes made. Re-run with --yes after reviewing the recipe."));
-        return;
-      }
-      const saved = await client.createRecipe(input, categoryUids);
-      printWriteSuccess("Created", saved, options.json);
+      const result = await createRecipe(client, input, {
+        categoryOverride: options.categories ? splitCategories(options.categories) : undefined,
+        confirm: options.yes === true,
+      });
+      printWriteResult(result, options.json);
     } catch (error) {
       printError(error instanceof Error ? error.message : String(error));
       process.exit(ExitCode.Failure);
@@ -362,17 +336,11 @@ program
     const client = new PaprikaClient(config);
     try {
       const input = loadRecipeInput(file, options.index);
-      const existing = isUuid(identifier) ? await client.getRecipe(identifier) : await client.findRecipeByName(identifier);
-      if (!existing) throw new Error(`Recipe not found: ${identifier}`);
-      const categoryUids = await resolveCategories(client, options.categories ? splitCategories(options.categories) : input.categories ?? existing.categories);
-      const preview = await client.previewRecipe(input, categoryUids, existing);
-      if (!options.yes) {
-        printWritePreview("Would update", preview, options.json);
-        if (!options.json) console.log(style.dim("No cloud changes made. Re-run with --yes after reviewing the recipe."));
-        return;
-      }
-      const saved = await client.updateRecipe(existing, input, categoryUids);
-      printWriteSuccess("Updated", saved, options.json);
+      const result = await updateRecipe(client, identifier, input, {
+        categoryOverride: options.categories ? splitCategories(options.categories) : undefined,
+        confirm: options.yes === true,
+      });
+      printWriteResult(result, options.json);
     } catch (error) {
       printError(error instanceof Error ? error.message : String(error));
       process.exit(ExitCode.Failure);
@@ -393,11 +361,7 @@ program
     const client = new PaprikaClient(config);
 
     try {
-      let meals = await client.getMeals();
-
-      if (options.date) {
-        meals = meals.filter((m) => m.date === options.date);
-      }
+      const meals = await listMeals(client, options.date);
 
       if (options.json) {
         console.log(JSON.stringify(meals, null, 2));
@@ -412,12 +376,10 @@ program
           byDate.set(meal.date, existing);
         }
 
-        const mealTypes = ["Breakfast", "Lunch", "Dinner", "Snack"];
-
         for (const [date, dateMeals] of [...byDate.entries()].sort()) {
           console.log(`\n${style.bold(date)}:`);
           for (const meal of dateMeals.sort((a, b) => a.type - b.type)) {
-            const type = mealTypes[meal.type] ?? "Other";
+            const type = MEAL_TYPES[meal.type] ?? "Other";
             console.log(`  ${style.dim(type + ":")} ${meal.name}`);
           }
         }
@@ -442,8 +404,7 @@ program
     const client = new PaprikaClient(config);
 
     try {
-      const items = await client.getGroceries();
-      const filtered = options.all ? items : items.filter((i) => !i.purchased);
+      const filtered = await listGroceries(client, options.all ?? false);
 
       if (options.json) {
         console.log(JSON.stringify(filtered, null, 2));
@@ -451,7 +412,7 @@ program
         console.log("Grocery list is empty.");
       } else {
         // Group by aisle
-        const byAisle = new Map<string, typeof items>();
+        const byAisle = new Map<string, typeof filtered>();
         for (const item of filtered) {
           const aisle = item.aisle || "Uncategorized";
           const existing = byAisle.get(aisle) ?? [];
@@ -504,6 +465,19 @@ program
       printError(error instanceof Error ? error.message : String(error));
       process.exit(ExitCode.Failure);
     }
+  });
+
+// ============================================
+// MCP Server
+// ============================================
+
+program
+  .command("serve")
+  .alias("mcp")
+  .description("Start the MCP server on stdio (writes need PAPRIKA_MCP_ENABLE_WRITES=1)")
+  .action(async () => {
+    const { serveStdio } = await import("./mcp.js");
+    await serveStdio();
   });
 
 // ============================================
@@ -561,88 +535,22 @@ function printRecipe(recipe: Recipe): void {
   console.log("");
 }
 
-function loadRecipeInput(file: string, index?: number): RecipeInput {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(file, "utf8"));
-  } catch (error) {
-    throw new Error(`Could not read recipe JSON from ${file}: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  if (Array.isArray(parsed)) {
-    if (!Number.isInteger(index) || index! < 0 || index! >= parsed.length) {
-      throw new Error(`Recipe input is an array; pass --index 0 through ${Math.max(0, parsed.length - 1)} to select one recipe.`);
-    }
-    parsed = parsed[index!];
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Recipe input must be a JSON object.");
-  }
-  const value = parsed as Record<string, unknown>;
-  for (const field of ["name", "ingredients", "directions"] as const) {
-    if (typeof value[field] !== "string" || !value[field].trim()) {
-      throw new Error(`Recipe input requires a non-empty string: ${field}`);
-    }
-  }
-  if (value.categories !== undefined && (!Array.isArray(value.categories) || value.categories.some((item) => typeof item !== "string"))) {
-    throw new Error("categories must be an array of Paprika category names or UIDs.");
-  }
-  if (value.photo_data !== undefined && (typeof value.photo_data !== "string" || value.photo_data.length === 0)) {
-    throw new Error("photo_data must be a non-empty base64 string.");
-  }
-  if (value.rating !== undefined) {
-    const rating = value.rating;
-    if (typeof rating !== "number" || !Number.isInteger(rating) || rating < 0 || rating > 5) {
-      throw new Error("rating must be an integer from 0 to 5.");
-    }
-  }
-  return value as unknown as RecipeInput;
-}
-
-function splitCategories(value: string): string[] {
-  const categories = value.split(",").map((item) => item.trim()).filter(Boolean);
-  if (categories.length === 0) throw new Error("--categories must contain at least one category name or UID.");
-  return categories;
-}
-
-async function resolveCategories(client: PaprikaClient, values: string[]): Promise<string[]> {
-  if (values.length === 0) return [];
-  const categories = await client.getCategories();
-  const resolved: string[] = [];
-  for (const value of values) {
-    if (isUuid(value)) {
-      resolved.push(value);
-      continue;
-    }
-    // Prefer an exact label before falling back to case-insensitive matching:
-    // a library can legitimately contain both "Dinner" and "dinner".
-    const exactMatches = categories.filter((category: Category) => category.name === value);
-    const matches = exactMatches.length > 0
-      ? exactMatches
-      : categories.filter((category: Category) => category.name.toLowerCase() === value.toLowerCase());
-    if (matches.length === 0) throw new Error(`Paprika category not found: ${value}`);
-    if (matches.length > 1) throw new Error(`Paprika category is ambiguous: ${value}. Use its UID instead.`);
-    resolved.push(matches[0]!.uid);
-  }
-  return [...new Set(resolved)];
-}
-
-function printWritePreview(action: string, recipe: Recipe, json?: boolean): void {
+function printWriteResult(result: WriteResult, json?: boolean): void {
+  const { recipe } = result;
   if (json) {
-    console.log(JSON.stringify({ action: action.toLowerCase(), dry_run: true, recipe }, null, 2));
+    console.log(JSON.stringify(result, null, 2));
     return;
   }
-  console.log(`\n${action}: ${style.bold(recipe.name)}`);
-  console.log(style.dim(`UID: ${recipe.uid}`));
-  console.log(style.dim(`Categories: ${recipe.categories.length || "none"}`));
-  console.log(style.dim(`Ingredients: ${recipe.ingredients.split("\n").filter(Boolean).length} lines; directions: ${recipe.directions.split("\n").filter(Boolean).length} lines${recipe.photo ? "; photo attached" : ""}\n`));
-}
-
-function printWriteSuccess(action: string, recipe: Recipe, json?: boolean): void {
-  if (json) {
-    console.log(JSON.stringify({ action: action.toLowerCase(), recipe }, null, 2));
+  if (result.dry_run) {
+    const action = result.action === "would create" ? "Would create" : "Would update";
+    console.log(`\n${action}: ${style.bold(recipe.name)}`);
+    console.log(style.dim(`UID: ${recipe.uid}`));
+    console.log(style.dim(`Categories: ${recipe.categories.length || "none"}`));
+    console.log(style.dim(`Ingredients: ${recipe.ingredients.split("\n").filter(Boolean).length} lines; directions: ${recipe.directions.split("\n").filter(Boolean).length} lines${recipe.photo ? "; photo attached" : ""}\n`));
+    console.log(style.dim("No cloud changes made. Re-run with --yes after reviewing the recipe."));
     return;
   }
-  printSuccess(`${action} recipe: ${recipe.name}`);
+  printSuccess(`${result.action === "created" ? "Created" : "Updated"} recipe: ${recipe.name}`);
   console.log(style.dim(`UID: ${recipe.uid}. Paprika sync has been notified.`));
 }
 

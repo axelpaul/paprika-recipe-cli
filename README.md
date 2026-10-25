@@ -1,146 +1,94 @@
 # paprika-recipe-cli
 
-> **⚠️ Unofficial CLI for Paprika Recipe Manager**  
-> Not affiliated with or endorsed by Hindsight Labs LLC.
+Command-line tool and MCP server for [Paprika Recipe Manager](https://www.paprikaapp.com): recipes, meal plans, grocery lists, and safe recipe create/update.
 
-A command-line interface for [Paprika Recipe Manager](https://www.paprikaapp.com). Access your recipes, meal plans, and grocery lists from the terminal. Recipe create/update commands include an explicit confirmation gate and can attach an embedded recipe photo.
+> **Unofficial — not affiliated with Paprika or Hindsight Labs LLC.**
 
-> **API caution:** Paprika does not publish this cloud-sync API as a supported public API. It may change or stop working without notice. Use it with a synced backup of your recipes and review every write preview before supplying `--yes`.
+> **API caution:** Paprika does not publish this cloud-sync API as a supported public API. It may change or stop working without notice. Keep a synced backup of your recipes and review every write preview before confirming it.
 
-## Installation
+Originally created by [Matt Russell](https://github.com/mjrussell); this fork (write support, MCP server) is maintained by [Axel Paul Gunnarsson](https://github.com/axelpaul).
 
-```bash
-npm install -g paprika-recipe-cli
+## Install
+
+Requires [Node.js](https://nodejs.org) 18 or newer (22+ recommended) and npm.
+
+```sh
+npm install -g github:axelpaul/paprika-recipe-cli   # install
+npm install -g github:axelpaul/paprika-recipe-cli   # update (re-run; pulls latest main)
+npm uninstall -g paprika-recipe-cli                  # uninstall
 ```
 
-Or run directly with npx:
+The install builds `dist/` from source via the `prepare` script, so it takes a few seconds.
 
-```bash
-npx paprika-recipe-cli --help
+With [Bun](https://bun.sh) (≥ 1.1) instead:
+
+```sh
+bun add -g github:axelpaul/paprika-recipe-cli   # install / update
+bun remove -g paprika-recipe-cli                 # uninstall
 ```
 
-## Quick Start
+**Prebuilt binaries:** download `paprika-<os>-<arch>` for Linux, macOS or Windows from the [Releases page](https://github.com/axelpaul/paprika-recipe-cli/releases), check it against `SHA256SUMS`, make it executable and put it on your `PATH`. The binaries do everything except attaching a photo from `photo_data` (that needs the native `sharp` image library; use the npm install for it).
 
-```bash
-# Authenticate (interactive)
-paprika auth
+## Authentication
 
-# List your recipes
-paprika recipes
+Paprika uses your Paprika cloud-sync email and password.
 
-# Search for a recipe
-paprika search "chicken"
-
-# View a recipe
-paprika recipe "Pasta Carbonara"
-
-# Check your grocery list
-paprika groceries
+```sh
+paprika auth      # interactive login; stores email, password and token in the config file (mode 600)
+paprika whoami    # show the stored account
+paprika logout    # delete the stored credentials
 ```
 
-## Commands
+For scripts, CI and MCP clients, set `PAPRIKA_EMAIL` and `PAPRIKA_PASSWORD` instead; environment variables take precedence over the config file.
 
-### Authentication
+## CLI usage
 
-```bash
-paprika auth              # Interactive login
-paprika logout            # Clear stored credentials
-paprika whoami            # Show current user
-```
+```sh
+paprika recipes                        # list all recipes
+paprika recipes --category "Dinner"    # filter by category name (partial match)
+paprika recipes --json                 # full recipe objects as JSON
 
-### Recipes
-
-```bash
-paprika recipes                        # List all recipes
-paprika recipes --category "Dinner"    # Filter by category
-paprika recipes --json                 # Output as JSON
-
-paprika recipe "Pasta Carbonara"       # View by name
-paprika recipe <uid>                   # View by UID
+paprika recipe "Pasta Carbonara"       # view by name (exact match, then partial)
+paprika recipe <uid>                   # view by UID
 paprika recipe "Pasta" --ingredients-only
 paprika recipe "Pasta" --json
 
-paprika search "chicken"               # Search recipes
+paprika search "chicken"               # search names and descriptions
 paprika search "quick dinner" --json
+
+paprika meals                          # meal plan
+paprika meals --date 2026-01-08        # one day
+paprika groceries                      # unpurchased grocery items
+paprika groceries --all                # include purchased items
+paprika categories                     # categories (with --json for UIDs)
 ```
+
+Global flags: `-h, --help`, `-V, --version`, `--no-color` (or `NO_COLOR`), and `--json` on most commands.
 
 ### Create or update recipes
 
-Recipe writes use Paprika's cloud-sync API. They are deliberately preview-only
-unless `--yes` is supplied, so a script or agent cannot create a recipe merely
-by preparing its input.
+Recipe writes use Paprika's cloud-sync API. They are preview-only unless `--yes` is supplied, so a script or agent cannot create a recipe merely by preparing its input.
 
-```bash
+```sh
 # Inspect the exact recipe that would be created; no cloud change is made.
 paprika recipe-create examples/recipe.json
 
 # Create it and notify Paprika clients to sync.
 paprika recipe-create examples/recipe.json --yes
 
-# Select one recipe from an existing JSON import batch, overriding categories.
-paprika recipe-create data/import-batch.json --index 0 --categories "kloi-import,NYT Cooking,Dinner" --yes
+# Select one recipe from a JSON array, overriding categories.
+paprika recipe-create import-batch.json --index 0 --categories "Imported,Dinner" --yes
 
 # Replace a recipe's editable fields from a complete JSON recipe document.
 paprika recipe-update "Example Tomato Pasta" examples/recipe.json
 paprika recipe-update "Example Tomato Pasta" examples/recipe.json --yes
 ```
 
-The input must contain `name`, `ingredients`, and `directions`. Optional fields
-include `description`, `notes`, `servings`, `prep_time`, `cook_time`,
-`total_time`, `source`, `source_url`, `image_url`, `rating`, `is_pinned`,
-`on_favorites`, and `categories`. Categories may be category names or UIDs and
-are resolved before saving. `photo_data`, when present, is decoded from base64,
-normalised to Paprika's full-size JPEG plus thumbnail, and attached after the
-recipe is saved. See [`examples/recipe.json`](examples/recipe.json).
+The input must contain `name`, `ingredients`, and `directions`. Optional fields: `description`, `notes`, `nutritional_info`, `servings`, `difficulty`, `prep_time`, `cook_time`, `total_time`, `source`, `source_url`, `image_url`, `rating` (0–5), `is_pinned`, `on_favorites`, and `categories`. Categories may be names or UIDs and are resolved before saving; unknown or ambiguous names are an error. On update, omitted optional fields keep their current values. See [`examples/recipe.json`](examples/recipe.json).
 
-Existing recipes with a photo are left alone: the command will not silently add
-a second one. Replacing an existing photo will be an explicit follow-up command.
+`photo_data`, when present, is decoded from base64, normalised to Paprika's full-size JPEG plus thumbnail, and attached after the recipe is saved. Recipes that already have a photo are left alone; the command will not silently add a second one.
 
-### Meal Planning
-
-```bash
-paprika meals                   # Show all planned meals
-paprika meals --date 2026-01-08 # Filter by date
-paprika meals --json
-```
-
-### Groceries
-
-```bash
-paprika groceries        # Show unpurchased items
-paprika groceries --all  # Include purchased items
-paprika groceries --json
-```
-
-### Categories
-
-```bash
-paprika categories       # List all categories
-paprika categories --json
-```
-
-## Options
-
-Global flags available on all commands:
-
-| Flag | Description |
-|------|-------------|
-| `-h, --help` | Show help |
-| `-V, --version` | Show version number |
-| `--no-color` | Disable colored output |
-| `--json` | Output as JSON (where applicable) |
-
-## Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `PAPRIKA_EMAIL` | Email for authentication |
-| `PAPRIKA_PASSWORD` | Password for authentication |
-| `NO_COLOR` | Disable colored output (any value) |
-
-For non-interactive use (scripts, CI/CD), set both `PAPRIKA_EMAIL` and `PAPRIKA_PASSWORD` environment variables.
-
-## Exit Codes
+### Exit codes
 
 | Code | Meaning |
 |------|---------|
@@ -149,45 +97,74 @@ For non-interactive use (scripts, CI/CD), set both `PAPRIKA_EMAIL` and `PAPRIKA_
 | `2` | Invalid usage (bad arguments) |
 | `3` | Authentication failure |
 
-## Examples
+## MCP server
 
-### Export all recipes to JSON
+`paprika serve` starts an MCP server on stdio (`paprika mcp` is an alias). Every tool uses the same client code as the CLI command named next to it.
 
-```bash
-paprika recipes --json > my-recipes.json
+| Tool | Access | Description |
+|------|--------|-------------|
+| `whoami` | read | Whether credentials are configured, the account email, and their source (env/file) |
+| `list_recipes` | read | Recipes not in the trash, optional `category` name filter; summaries unless `full: true` (`paprika recipes`) |
+| `search_recipes` | read | Search names and descriptions (`paprika search`) |
+| `get_recipe` | read | One recipe by UID or name, optional `ingredients_only` (`paprika recipe`) |
+| `list_categories` | read | Categories with UIDs (`paprika categories`) |
+| `list_meals` | read | Meal plan, optional `date` (YYYY-MM-DD) (`paprika meals`) |
+| `list_groceries` | read | Grocery list, `all: true` to include purchased items (`paprika groceries`) |
+| `create_recipe` | write | Create a recipe (`paprika recipe-create`) |
+| `update_recipe` | write | Replace a recipe's fields (`paprika recipe-update`) |
+
+Write tools are only listed when the server is started with `PAPRIKA_MCP_ENABLE_WRITES=1`. Even then they return a preview and change nothing unless the call passes `confirm: true` (the MCP equivalent of `--yes`). `auth`/`logout` are not exposed: configure credentials with env vars or by running `paprika auth` once.
+
+Claude Code:
+
+```sh
+claude mcp add paprika -e PAPRIKA_EMAIL=you@example.com -e PAPRIKA_PASSWORD=... -- paprika serve
 ```
 
-### Get ingredients for a recipe
+(Leave out the `-e` flags if you have already run `paprika auth`.)
 
-```bash
-paprika recipe "Spaghetti" --ingredients-only
+Claude Desktop, Cursor and other JSON-configured clients:
+
+```json
+{
+  "mcpServers": {
+    "paprika": {
+      "command": "paprika",
+      "args": ["serve"],
+      "env": {
+        "PAPRIKA_EMAIL": "you@example.com",
+        "PAPRIKA_PASSWORD": "your-password",
+        "PAPRIKA_MCP_ENABLE_WRITES": "1"
+      }
+    }
+  }
+}
 ```
 
-### Script: Check if a recipe exists
+Drop `PAPRIKA_MCP_ENABLE_WRITES` to keep the server read-only. GUI apps may not have npm's global bin directory (or `~/.bun/bin`) on their `PATH`; if the server fails to start, use the absolute path from `which paprika` as `command`.
 
-```bash
-if paprika recipe "Lasagna" --json > /dev/null 2>&1; then
-  echo "Recipe found!"
-fi
-```
+## Configuration
 
-### View this week's meal plan
+| Variable | Description |
+|----------|-------------|
+| `PAPRIKA_EMAIL` | Paprika account email (with `PAPRIKA_PASSWORD`, overrides the config file) |
+| `PAPRIKA_PASSWORD` | Paprika account password |
+| `PAPRIKA_MCP_ENABLE_WRITES` | Set to `1` to expose `create_recipe` / `update_recipe` in the MCP server |
+| `XDG_CONFIG_HOME` | Base directory for the config file (default `~/.config`) |
+| `NO_COLOR` | Disable colored output (any value) |
 
-```bash
-# Get meals for a specific date
-paprika meals --date $(date +%Y-%m-%d)
-```
+Credentials saved by `paprika auth` live in `$XDG_CONFIG_HOME/paprika-recipe-cli/config.json` (default `~/.config/paprika-recipe-cli/config.json`, file mode 600). A config file from older versions at `~/.config/paprika-cli/config.json` is still read. Nothing is cached on disk.
 
-## API Client
+### Library use
 
-This package also exports a TypeScript client for programmatic use:
+The package also exports the TypeScript client:
 
 ```typescript
-import { PaprikaClient } from 'paprika-recipe-cli';
+import { PaprikaClient } from "paprika-recipe-cli";
 
 const client = new PaprikaClient({
-  email: process.env.PAPRIKA_EMAIL,
-  password: process.env.PAPRIKA_PASSWORD,
+  email: process.env.PAPRIKA_EMAIL!,
+  password: process.env.PAPRIKA_PASSWORD!,
 });
 
 const recipes = await client.getAllRecipes();
@@ -197,20 +174,18 @@ const groceries = await client.getGroceries();
 
 ## Development
 
-```bash
+```sh
 git clone https://github.com/axelpaul/paprika-recipe-cli
 cd paprika-recipe-cli
-npm install
-npm run build
+npm install          # also builds dist/ via prepare
+npm run check        # typecheck, build, tests
 node dist/cli.js --help
 ```
 
+Shared logic used by both the CLI and the MCP server is in `src/core.ts`; tools are in `src/mcp.ts`. Recipe writes and photo uploads reuse the sync client from [`@bojanrajkovic/mcp-paprika`](https://github.com/bojanrajkovic/mcp-paprika). Pushing a `v*` tag builds binaries with `bun build --compile` and publishes a GitHub release.
+
 ## License
 
-MIT. Originally created by [Matt Russell](https://github.com/mjrussell); this fork is maintained by [Axel Gunnarsson](https://github.com/axelpaul).
+MIT. Originally created by [Matt Russell](https://github.com/mjrussell); this fork is maintained by [Axel Paul Gunnarsson](https://github.com/axelpaul).
 
-## Disclaimer
-
-This is an unofficial tool created by the community. Paprika Recipe Manager is a trademark of Hindsight Labs LLC. This project is not affiliated with, endorsed by, or connected to Hindsight Labs LLC in any way.
-
-Requires a Paprika Recipe Manager account with cloud sync enabled.
+Paprika Recipe Manager is a trademark of Hindsight Labs LLC. This project is not affiliated with, endorsed by, or connected to Hindsight Labs LLC in any way. Requires a Paprika account with cloud sync enabled.

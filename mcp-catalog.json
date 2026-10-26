@@ -1,0 +1,116 @@
+{
+  "$schema": "https://mcp.axelpaul.is/catalog.schema.json",
+  "id": "paprika",
+  "repo": "axelpaul/paprika-recipe-cli",
+  "name": "Paprika",
+  "service": "Paprika Recipe Manager",
+  "serviceUrl": "https://www.paprikaapp.com",
+  "tagline": "Recipes, meal plans and grocery lists in Paprika",
+  "description": "Search your recipes in Paprika Recipe Manager and check your meal plan and grocery list. You can also save new recipes with photos after a preview. The tool connects through Paprika’s cloud sync and builds on Matt Russell’s Paprika CLI.",
+  "examples": [
+    "Find my pancake recipe.",
+    "What's on the meal plan this week?",
+    "Save this recipe to Paprika."
+  ],
+  "category": "Food",
+  "keywords": [
+    "uppskriftir",
+    "recipes",
+    "matur",
+    "cooking",
+    "grocery"
+  ],
+  "auth": "email+password",
+  "binaries": true,
+  "sourceInstall": "npm install -g github:axelpaul/paprika-recipe-cli",
+  "sourceRemove": "npm uninstall -g paprika-recipe-cli",
+  "requires": "Node.js 18 or newer",
+  "tools": [
+    {
+      "name": "whoami",
+      "write": false,
+      "description": "Show whether credentials are configured and for which account"
+    },
+    {
+      "name": "list_recipes",
+      "write": false,
+      "description": "List recipes not in the trash, optionally filtered by category name"
+    },
+    {
+      "name": "search_recipes",
+      "write": false,
+      "description": "Search recipes by name or description"
+    },
+    {
+      "name": "get_recipe",
+      "write": false,
+      "description": "Get one recipe by UID or name, optionally ingredients only"
+    },
+    {
+      "name": "list_categories",
+      "write": false,
+      "description": "List recipe categories with UIDs"
+    },
+    {
+      "name": "list_meals",
+      "write": false,
+      "description": "Show the meal plan, optionally for one date"
+    },
+    {
+      "name": "list_groceries",
+      "write": false,
+      "description": "Show the grocery list, optionally including purchased items"
+    },
+    {
+      "name": "create_recipe",
+      "write": true,
+      "description": "Create a recipe (preview unless confirm=true), optionally with a photo"
+    },
+    {
+      "name": "update_recipe",
+      "write": true,
+      "description": "Replace an existing recipe's fields (preview unless confirm=true)"
+    }
+  ],
+  "commands": [
+    "paprika auth",
+    "paprika recipes [--category <name>]",
+    "paprika search <query>",
+    "paprika recipe <name|uid> [--ingredients-only]",
+    "paprika meals [--date YYYY-MM-DD]",
+    "paprika groceries [--all]",
+    "paprika categories",
+    "paprika recipe-create <file.json> [--yes]",
+    "paprika recipe-update <name|uid> <file.json> [--yes]",
+    "paprika serve"
+  ],
+  "envVars": [
+    {
+      "name": "PAPRIKA_EMAIL",
+      "description": "Paprika account email (with PAPRIKA_PASSWORD, overrides the config file)"
+    },
+    {
+      "name": "PAPRIKA_PASSWORD",
+      "description": "Paprika account password"
+    },
+    {
+      "name": "PAPRIKA_MCP_ENABLE_WRITES",
+      "description": "Set to 1 to expose create_recipe and update_recipe in the MCP server"
+    },
+    {
+      "name": "XDG_CONFIG_HOME",
+      "description": "Base directory for the config file (default ~/.config)"
+    }
+  ],
+  "writesEnvVar": "PAPRIKA_MCP_ENABLE_WRITES",
+  "is": {
+    "tagline": "Uppskriftir, mataráætlanir og innkaupalistar í Paprika",
+    "description": "Leitaðu í uppskriftunum þínum í Paprika Recipe Manager og skoðaðu mataráætlunina og innkaupalistann. Þú getur líka vistað nýjar uppskriftir með mynd eftir forskoðun. Tólið tengist Paprika í gegnum skýjasamstillingu og byggir á Paprika CLI eftir Matt Russell.",
+    "examples": [
+      "Finndu pönnukökuuppskriftina mína.",
+      "Hvað er á mataráætluninni í vikunni?",
+      "Vistaðu þessa uppskrift í Paprika."
+    ],
+    "requires": "Node.js 18 eða nýrra"
+  }
+}
